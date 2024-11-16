@@ -1,4 +1,5 @@
 {-# LANGUAGE StandaloneDeriving #-}
+{-# OPTIONS_GHC -Wno-overlapping-patterns #-}
 module Problems10 where
 
 {-------------------------------------------------------------------------------
@@ -108,7 +109,10 @@ subst x m (Var y)
   | otherwise = Var y
 subst x m (Lam y n) = Lam y (substUnder x m y n)
 subst x m (App n1 n2) = App (subst x m n1) (subst x m n2)
-subst x m n = undefined
+subst x m (Store n) = Store (subst x m n)
+subst _ _ Recall = Recall
+subst x m (Throw n) = Throw (subst x m n)
+subst x m (Catch n y n') = Catch (subst x m n) y (substUnder x m y n')
 
 {-------------------------------------------------------------------------------
 
@@ -202,7 +206,45 @@ bubble; this won't *just* be `Throw` and `Catch.
 -------------------------------------------------------------------------------}
 
 smallStep :: (Expr, Expr) -> Maybe (Expr, Expr)
-smallStep = undefined
+smallStep (Const _, acc) = Nothing -- Values don't step
+smallStep (Plus (Const n1) (Const n2), acc) = Just (Const (n1 + n2), acc) -- Add constants
+smallStep (Plus (Const n) e2, acc) = 
+  case smallStep (e2, acc) of
+    Just (e2', acc') -> Just (Plus (Const n) e2', acc')
+    Nothing -> Nothing
+smallStep (Plus e1 e2, acc) = 
+  case smallStep (e1, acc) of
+    Just (e1', acc') -> Just (Plus e1' e2, acc')
+    Nothing -> Nothing
+smallStep (Store (Const v), _) = Just (Const v, Const v) -- Update accumulator
+smallStep (Store e, acc) = 
+  case smallStep (e, acc) of
+    Just (e', acc') -> Just (Store e', acc')
+    Nothing -> Nothing
+smallStep (Recall, acc) = Just (acc, acc) -- Return accumulator value
+smallStep (Throw (Const v), acc) = Just (Throw (Const v), acc) -- Thrown value bubbles
+smallStep (Throw e, acc) = 
+  case smallStep (e, acc) of
+    Just (e', acc') -> Just (Throw e', acc')
+    Nothing -> Nothing
+smallStep (Catch (Const v) _ _, acc) = Just (Const v, acc) -- Catch a value
+smallStep (Catch (Throw (Const v)) y n, acc) = Just (subst y (Const v) n, acc) -- Handle exception
+smallStep (Catch e y n, acc) = 
+  case smallStep (e, acc) of
+    Just (e', acc') -> Just (Catch e' y n, acc')
+    Nothing -> Nothing
+smallStep (App (Lam x e1) (Const v2), acc) = Just (subst x (Const v2) e1, acc) -- Function application
+smallStep (App e1 e2, acc) = 
+  case smallStep (e1, acc) of
+    Just (e1', acc') -> Just (App e1' e2, acc')
+    Nothing -> Nothing
+smallStep (App (Lam x e1) (Const v2), acc) = Just (subst x (Const v2) e1, acc) -- Function application
+smallStep (App e1 e2, acc) = 
+  case smallStep (e1, acc) of
+    Just (e1', acc') -> Just (App e1' e2, acc')
+    Nothing -> Nothing
+smallStep (_, _) = Nothing -- No matching case
+
 
 steps :: (Expr, Expr) -> [(Expr, Expr)]
 steps s = case smallStep s of
